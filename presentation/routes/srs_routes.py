@@ -12,9 +12,6 @@ from fastapi.responses import RedirectResponse
 
 import os
 import uuid
-import traceback
-from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 import fitz
 import subprocess
 from pathlib import Path
@@ -22,8 +19,7 @@ from pathlib import Path
 
 from fastapi.responses import RedirectResponse
 import pdfplumber
-from fastapi import APIRouter, UploadFile, Request, File, Form
-from fastapi.responses import FileResponse
+import traceback
 from application.extraction.extraction_service import process_srs
 from application.extraction.adl.json_to_acme import convert_to_acme
 from application.extraction.adl.json_to_acme import convert_to_acme
@@ -59,55 +55,8 @@ from service.hybrid_service import execute_hybrid_method
 from infrastructure.repositories.project_repo import update_project_progress, create_project, save_project_data
 from infrastructure.repositories.weighted_repository import save_weighted_result
 from infrastructure.repositories.nfr_dataset_repository import NFRPredictionRepository
-from infrastructure.repositories.srs_repository import SRSRepository
-from infrastructure.repositories.human_feedback_repository import save_new_confirmed_nfr
-from infrastructure.repositories.project_repo import get_user_adl_projects
-from infrastructure.repositories.project_repo import get_project
-from infrastructure.repositories.ADL_repository import save_architecture_report_pdf
-from infrastructure.repositories.validation_report_repository import save_validation_report_pdf
+import pdfplumber
 
-from infrastructure.repositories.project_repo import get_user_adl_projects
-from infrastructure.repositories.project_repo import get_project
-from infrastructure.repositories.ADL_repository import save_architecture_report_pdf
-from infrastructure.repositories.validation_report_repository import save_validation_report_pdf
-
-
-from service.retrain_service import merge_and_retrain, run_retrain_async
-from infrastructure.database import db
-from ai.inference.feature_extractor import generate_phase4
-from ai.ai_engine import ai_generate_architecture
-from infrastructure.repositories.project_repo import create_project
-
-
-
-from ai.json_to_c4_plantuml import convert_to_c4_plantuml
-from ai.json_to_process_view import convert_to_process_view
-from ai.json_to_deployment_view import convert_to_deployment_view
-from ai.json_to_usecase_view import convert_to_usecase_view
-
-from infrastructure.repositories.project_repo import get_user_adl_projects
-from infrastructure.repositories.project_repo import update_project_progress, create_project, save_project_data
-from infrastructure.repositories.weighted_repository import save_weighted_result
-from infrastructure.repositories.nfr_dataset_repository import NFRPredictionRepository
-from infrastructure.repositories.srs_repository import SRSRepository
-from infrastructure.repositories.human_feedback_repository import save_new_confirmed_nfr
-from application.extraction.adl.validation.runner import run_validation
-from application.extraction.reporting.report_generator import generate_report
-from infrastructure.repositories.project_repo import get_project
-from infrastructure.repositories.ADL_repository import save_architecture_report_pdf
-from infrastructure.repositories.validation_report_repository import save_validation_report_pdf
-from ai.ai_engine import ai_generate_architecture
-from application.extraction.adl.validation.validation_report_generator import generate_validation_pdf
-from service.retrain_service import merge_and_retrain, run_retrain_async
-from infrastructure.database import db
-from infrastructure.repositories.project_repo import create_project
-from ai.json_to_c4_plantuml import convert_to_c4_plantuml
-from ai.json_to_process_view import convert_to_process_view
-from ai.json_to_deployment_view import convert_to_deployment_view
-from ai.json_to_usecase_view import convert_to_usecase_view
-from ai.inference.feature_extractor import generate_phase4
-
-templates = Jinja2Templates(directory="presentation/templates")
 
 router = APIRouter()
 
@@ -183,30 +132,17 @@ async def extract_srs(request: Request, file: UploadFile = File(...)):
     try:
 
         if not file:
-
-            return JSONResponse(
-
-                status_code=400,
-
-                content={
-                    "error": "No file uploaded"
-                }
-            )
-         # ✅ USE VALIDATION FUNCTION
+            return JSONResponse(status_code=400, content={"error": "No file uploaded"})
+        # ✅ USE VALIDATION FUNCTION
         validation_error = validate_pdf_file(file)
         if validation_error:
             return JSONResponse(
-                status_code=400,content={"error": validation_error})
+                status_code=400,
+                content={"error": validation_error}
+            )
 
-        # ==========================================
-        # SAVE PDF
-        # ==========================================
-
-        pdf_path = os.path.join(
-            UPLOAD_DIR,
-            f"{project_id}.pdf"
-        )
-
+        # 1️⃣ Save PDF
+        pdf_path = os.path.join(UPLOAD_DIR, f"{project_id}.pdf")
         file_bytes = await file.read()
 
         with open(pdf_path, "wb") as f:
@@ -330,18 +266,9 @@ async def extract_srs(request: Request, file: UploadFile = File(...)):
             "guest"
         )
 
-        create_project(
-            project_id,
-            user_id,
-            project_name
-        )
-
-        # ==========================================
-        # PREDICT NFR TYPES + LEVELS
-        # ==========================================
-
-        all_predictions = \
-            predict_and_save_nfr(project_id)
+        create_project(project_id, user_id, project_name)
+        # 3️⃣ Predict NFR Type + Level → Saves to BOTH MongoDB AND JSON
+        all_predictions =predict_and_save_nfr(project_id)
 
         if not all_predictions:
 
@@ -363,25 +290,7 @@ async def extract_srs(request: Request, file: UploadFile = File(...)):
                 project_id
             )
 
-        save_project_data(project_id, {
-            "functional":
-                extraction_result.get(
-                    "functional",
-                    []
-                ),
-
-            "nfr_predictions":
-                high_confidence
-
-                
-        })
-
-        print(
-            f"📊 High confidence: "
-            f"{len(high_confidence)}, "
-            f"Low confidence: "
-            f"{len(low_confidence)}"
-        )
+        print(f"📊 High confidence: {len(high_confidence)}, Low confidence: {len(low_confidence)}")
 
         # ==========================================
         # AUTO RUN ARCHITECTURE
@@ -1464,31 +1373,15 @@ async def confirm_nfr(request: Request):
     return {
 
         "status": "ok",
-
-        "saved_count":
-            confirmed_count,
-
-        "functional_method":
-            functional_result,
-
-        "ordinal_method":
-            ordinal_result.get("result"),
-
-        "binary_method":
-            binary_result,
-
-        "weighted_method":
-            weighted_result,
-
-        "hybrid_method":
-            hybrid_result,
-
-        "nfr_predictions":
-            clean_object_id(all_nfrs),
-
-        "phase4":
-            phase4
+        "saved_count": confirmed_count,
+        "functional_method": functional_result,
+        "ordinal_method": ordinal_result.get("result"),
+        "binary_method": binary_result,
+        "weighted_method": weighted_result,
+        "hybrid_method": hybrid_result,
+        "nfr_predictions": clean_object_id(all_nfrs)
     }
+
 
 @router.post("/logout")
 async def logout(request: Request):
