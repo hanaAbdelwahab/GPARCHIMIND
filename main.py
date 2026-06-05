@@ -995,15 +995,15 @@ def generate_architecture(project_id: str):
     )
 
     subprocess.run([
-        r"C:\Program Files\Java\jdk-24\bin\java.exe",
-        "-jar",
-        PLANTUML_JAR,
-        "-tpng",
-        "data/outputs/dfd_context.puml",
-        "data/outputs/process_view.puml",
-        "data/outputs/deployment_view.puml",
-        "data/outputs/architecture_c4.puml",
-        "data/outputs/usecase_view.puml"
+    "java",
+    "-jar",
+    PLANTUML_JAR,
+    "-tpng",
+    "data/outputs/dfd_context.puml",
+    "data/outputs/process_view.puml",
+    "data/outputs/deployment_view.puml",
+    "data/outputs/architecture_c4.puml",
+    "data/outputs/usecase_view.puml"
     ], check=True)
 
     # ==========================================================
@@ -1066,7 +1066,7 @@ async def login_page(
        info_message = "Your account created successfully! Login Now" 
     
     return templates.TemplateResponse(
-        "login.html",
+        "Login.html",
         {
             "request": request,
             "error": error_message,
@@ -1094,7 +1094,7 @@ async def dashboard(request: Request):
     }
 
     return templates.TemplateResponse(
-        "Dashboard.html",
+        "DashBoard.html",
         {
             "request": request,
             "user": user,

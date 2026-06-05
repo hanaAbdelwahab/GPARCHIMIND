@@ -4,6 +4,7 @@ let extractedData = null;
 let pendingConfirmation = false; 
 let generatedSkeletonHTML = null;
 // Add defensive check
+//newcomment 
 window.addEventListener('DOMContentLoaded', () => {
   console.log("Dashboard initialized");
   if (extractedData) {
@@ -270,24 +271,17 @@ function checkADLInputs() {
     return html;
   }
 
-function renderBinaryMethod(data) {
-    if (
-        !data ||
-        !data.binary_method ||
-        !data.binary_method.top_5_architectures
-    ) {
+  function renderBinaryMethod(data) {
+    if (!data || !data.binary_method || !data.binary_method.top_architectures) {
       return "<p class='text-muted'>No binary method results available.</p>";
     }
 
     let html = "<h5 class='section-header'>Binary Method</h5>";
 
-    data.binary_method.top_5_architectures.forEach((item, idx) => {
+    data.binary_method.top_architectures.forEach((item, idx) => {
       html += `
         <div class="mb-3">
-          <div class="req-title">
-            ${idx + 1}. ${item.architecture}
-          </div>
-
+          <div class="req-title">${idx + 1}. ${item.architecture}</div>
           <div class="req-desc">
             Score: <strong>${item.score}</strong>
           </div>
@@ -296,7 +290,8 @@ function renderBinaryMethod(data) {
     });
 
     return html;
-}
+  }
+
   function renderWeightedMethod(data) {
     if (!data || !data.weighted_method || !data.weighted_method.top_architectures) {
       return "<p class='text-muted'>No weighted method results available.</p>";
@@ -716,18 +711,10 @@ console.log("Project ID:", extractedData?.project_id);
         );
         reportModal.show();
         document.getElementById('reportModal').addEventListener('hidden.bs.modal', () => {
+        document.body.classList.remove('modal-open');
 
-         document.body.classList.remove('modal-open');
-
-          document.body.style.overflow = 'auto';
-
-         document.body.style.paddingRight = '0px';
-
-         document.body.style.position = 'static';
-
-         document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
-
-});
+        document.querySelectorAll('.modal-backdrop').forEach(el => el.remove());
+        });
         // 6. Cleanup el memory lma el modal ye2fel
          document
           .getElementById('reportModal')
@@ -788,32 +775,21 @@ function loadValidationReport() {
     { once: true }
   );
 }
-
 function loadVerificationReport() {
-
   const frame = document.getElementById("reportFrame");
   const loader = document.getElementById("modalIframeLoader");
-
   loader.style.display = "block";
   frame.style.opacity = "0";
-
-  // IMPORTANT
-  frame.src = `/download-verification-report/${extractedData.project_id}`;
-
-  frame.onload = () => {
-    loader.style.display = "none";
-    frame.style.opacity = "1";
-  };
-
-  const reportModal = new bootstrap.Modal(
-    document.getElementById("reportModal")
+  frame.src = "/download-verification-report";
+  frame.addEventListener(
+    "load",
+    () => {
+      loader.style.display = "none";
+      frame.style.opacity = "1";
+    },
+    { once: true }
   );
-
-  reportModal.show();
 }
-
-
-
 
   function renderPhase() {
     const data = phaseData[currentPhase];
