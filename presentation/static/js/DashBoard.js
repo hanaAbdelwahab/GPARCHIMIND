@@ -2,6 +2,7 @@
 let currentPhase = 1;
 let extractedData = null;
 let pendingConfirmation = false; 
+let generatedSkeletonHTML = null;
 // Add defensive check
 window.addEventListener('DOMContentLoaded', () => {
   console.log("Dashboard initialized");
@@ -38,7 +39,75 @@ window.addEventListener('DOMContentLoaded', () => {
     tabs: ["Design Patterns", "Code Skeleton"] 
   }
   };
+function generateStandaloneADL() {
+  const fileInput = document.getElementById("adlFileInput");
+  const arch = document.getElementById("adlArchitecture").value;
 
+  if (!fileInput.files.length || !arch) {
+    alert("Please upload SRS file and select architecture");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("file", fileInput.files[0]);
+  formData.append("architecture", arch);
+
+  // إظهار اللودر (اختياري)
+  startLoadingAnimation();
+
+  fetch("/adl/generate-pdf", { // تأكدي أن الـ URL هو نفسه اللي في الـ FastAPI
+    method: "POST",
+    body: formData
+  })
+  .then(res => {
+    stopLoadingAnimation();
+    if (!res.ok) throw new Error("Server error");
+    return res.blob(); // بنستلم الملف كـ binary data
+  })
+  .then(blob => {
+    const url = window.URL.createObjectURL(blob);
+    
+    // لفتح الملف في tab جديد:
+    const a = document.createElement("a");
+a.href = url;
+a.download = "Architecture_Report.pdf";
+document.body.appendChild(a);
+a.click();
+a.remove();
+
+    // أو للتحميل المباشر:
+    /*
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "Architecture_Report.pdf";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    */
+  })
+  .catch(err => {
+    stopLoadingAnimation();
+    console.error(err);
+    alert("Error generating PDF: " + err.message);
+  });
+}
+
+function openADLGenerator() {
+  window.location.href = "/adl-dashboard";
+}
+
+function checkADLInputs() {
+  const file = document.getElementById("adlFileInput").files.length;
+  const arch = document.getElementById("adlArchitecture").value;
+
+  const btn = document.getElementById("generateAdlBtn");
+
+  if (file && arch) {
+    btn.disabled = false;
+  } else {
+    btn.disabled = true;
+  }
+}
   function showUploader() {
     document.getElementById('dashboardView').classList.add('hidden');
     document.getElementById('uploadView').classList.remove('hidden');
@@ -414,23 +483,182 @@ function renderDesignPatterns(data) {
 }
 
 function renderCodeSkeleton(data) {
-  if (!data || !data.phase4 || !data.phase4.code) {
-    return "<p class='text-muted'>No code generated.</p>";
+  if (generatedSkeletonHTML) {
+    return `
+      <h5 class="section-header mb-4">
+        <i class="bi bi-braces me-2 text-success"></i>Generated Code Skeleton
+      </h5>
+      <div id="generatedSkeletonBox">
+        ${generatedSkeletonHTML}
+      </div>
+    `;
   }
 
   return `
-    <h5 class="section-header">Generated Code Skeleton</h5>
+    <h5 class="section-header mb-4">
+      <i class="bi bi-braces me-2 text-success"></i>Code Skeleton Generator
+    </h5>
+    <div id="generatedSkeletonBox" class="skeleton-glass-panel">
+      <div class="text-center">
+        <div class="mb-4">
+          <i class="bi bi-code-square" style="font-size: 2.5rem; color: var(--accent-main); opacity: 0.8;"></i>
+        </div>
+        <h4 class="mb-2 fw-bold" style="color: var(--nav-dark);">
+          Select Language Framework
+        </h4>
+        <p class="text-muted mb-4 small">Generate a structural blueprint based on your architectural choices.</p>
 
-    <div class="code-box position-relative">
-      <button class="copy-btn" onclick="copyCode()">Copy</button>
-      <pre><code id="generatedCode">${data.phase4.code}</code></pre>
-    </div>
+        <select id="languageSelect" class="custom-select-glass w-50 mx-auto mb-4 d-block">
+          <option value="" disabled selected>Choose a programming language...</option>
+          <option value="python">Python</option>
+          <option value="java">Java</option>
+          <option value="javascript">JavaScript / Node.js</option>
+          <option value="typescript">TypeScript</option>
+          <option value="csharp">C# / .NET</option>
+          <option value="go">Go</option>
+          <option value="php">PHP</option>
+          <option value="ruby">Ruby</option>
+          <option value="kotlin">Kotlin</option>
+          <option value="swift">Swift</option>
+        </select>
 
-    <div class="mt-4 text-center">
-      <button class="btn btn-success px-4 me-2" onclick="downloadCode()">Download</button>
-      <button class="btn btn-outline-light px-4" onclick="regenerateCode()">Regenerate</button>
+        <button
+  id="generateSkeletonBtn"
+  class="btn-generate-pulse mt-2"
+  onclick="generateSkeletonWithLanguage()">
+          <i class="bi bi-cpu me-2"></i>Generate Blueprint
+        </button>
+      </div>
     </div>
   `;
+}
+
+async function generateSkeletonWithLanguage() {
+  const selectEl = document.getElementById("languageSelect");
+  const language = selectEl.value;
+
+  if(!language) {
+      alert("Please select a language first!");
+      return;
+  }
+
+  const box = document.getElementById("generatedSkeletonBox");
+  const generateBtn =
+  document.getElementById("generateSkeletonBtn");
+
+generateBtn.innerHTML = `
+  <span
+    class="spinner-border spinner-border-sm me-2">
+  </span>
+  Generating...
+`;
+
+generateBtn.disabled = true;
+  // Cinematic Loading State
+  box.innerHTML = `
+    <div class="skeleton-glass-panel">
+      <div class="d-flex align-items-center mb-4 text-muted">
+        <div class="spinner-border spinner-border-sm me-3 text-success" role="status"></div>
+        <span class="fw-semibold tracking-wider text-uppercase">Compiling architectural tree...</span>
+      </div>
+      <div class="code-display-area">
+        <div class="skeleton-loader-line"></div>
+        <div class="skeleton-loader-line medium"></div>
+        <div class="skeleton-loader-line"></div>
+        <div class="skeleton-loader-line short"></div>
+        <div class="skeleton-loader-line medium"></div>
+      </div>
+    </div>
+  `;
+
+  try {
+    const response = await fetch("/generate-skeleton", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: extractedData.project_id,
+        language: language
+      })
+    });
+
+    const data = await response.json();
+
+    // The Final Generated View
+    generatedSkeletonHTML = `
+      <div class="skeleton-glass-panel">
+        <div class="d-flex justify-content-between align-items-center mb-4 border-bottom pb-3">
+          <button class="code-action-btn" onclick="backToLanguageSelection()">
+            <i class="bi bi-arrow-left"></i> Back
+          </button>
+          
+          <div class="d-flex gap-2">
+            <button
+  class="code-action-btn skeleton-main-btn"
+  id="copyCodeBtn"
+  onclick="copyCode()">
+              <i class="bi bi-clipboard"></i> <span>Copy</span>
+            </button>
+            <button
+  class="code-action-btn skeleton-main-btn"
+  id="downloadBtn" onclick="downloadCodeSKELETON()">
+              <i class="bi bi-download"></i> Download .zip
+            </button>
+             <button
+      class="code-action-btn skeleton-main-btn"
+      onclick="downloadFinalReport()">
+      <i class="bi bi-file-earmark-pdf-fill"></i>
+      Final Report
+    </button>
+          </div>
+        </div>
+
+        <div class="code-display-area animate-fade-down">
+          <pre><code id="generatedCode">${data.code}</code></pre>
+        </div>
+      </div>
+    `;
+    
+    box.innerHTML = generatedSkeletonHTML;
+
+  } catch (error) {
+    box.innerHTML = `
+      <div class="alert alert-danger" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2"></i> Failed to generate skeleton. Please try again.
+        <br><button class="btn btn-sm btn-outline-danger mt-2" onclick="backToLanguageSelection()">Go Back</button>
+      </div>
+    `;
+  }
+}
+
+function backToLanguageSelection() {
+  generatedSkeletonHTML = null; // Reset state
+  renderPhase(); // Re-render to show the pristine selection screen
+}
+
+function copyCode() {
+  const code = document.getElementById("generatedCode").innerText;
+  navigator.clipboard.writeText(code).then(() => {
+    // Visual feedback for copying
+    const copyBtn = document.getElementById("copyCodeBtn");
+    const originalHTML = copyBtn.innerHTML;
+    
+    copyBtn.innerHTML = `
+  <i class="bi bi-check2-all"></i>
+  <span>Copied</span>
+`;
+
+copyBtn.style.background =
+  "linear-gradient(135deg,#10b981,#06b6d4)";
+copyBtn.style.color = "white";
+    copyBtn.style.color = "#10b981";
+    copyBtn.style.borderColor = "#10b981";
+    copyBtn.style.background = "#ecfdf5";
+    
+    setTimeout(() => {
+      copyBtn.innerHTML = originalHTML;
+      copyBtn.style = ""; // Reset inline styles
+    }, 2000);
+  });
 }
   /* =======================
      TAB RENDERING
@@ -546,7 +774,21 @@ function loadValidationReport() {
     { once: true }
   );
 }
-
+function loadVerificationReport() {
+  const frame = document.getElementById("reportFrame");
+  const loader = document.getElementById("modalIframeLoader");
+  loader.style.display = "block";
+  frame.style.opacity = "0";
+  frame.src = "/download-verification-report";
+  frame.addEventListener(
+    "load",
+    () => {
+      loader.style.display = "none";
+      frame.style.opacity = "1";
+    },
+    { once: true }
+  );
+}
 
   function renderPhase() {
     const data = phaseData[currentPhase];
@@ -725,7 +967,10 @@ document.getElementById('processForm').onsubmit = async (e) => {
       showResults();
     }
 
+
   } catch (err) {
+      console.log("🔥 ERROR FROM BACKEND:", err);
+
     stopLoadingAnimation();
     loading.classList.add('hidden');
     document.getElementById('step-upload').classList.remove('hidden');
@@ -736,7 +981,7 @@ document.getElementById('processForm').onsubmit = async (e) => {
     if (msg.toLowerCase().includes("pdf")) {
       friendlyMsg = "Invalid file format. Please upload a valid PDF document.";
     } else if (msg.toLowerCase().includes("timeout")) {
-      friendlyMsg = "The process took too long. Please try again later.";
+      friendlyMsg = "The process took too long. Please try again later.";                            
     }
 
     showErrorModal(friendlyMsg);
@@ -968,7 +1213,7 @@ function hideNfrInlineError() {
   }
   function backToDashboard(){
   document.getElementById("uploadView").classList.add("hidden");
-  document.getElementById("adlView").classList.add("hidden"); // ✅ دي الجديدة
+  document.getElementById("adlView").classList.add("hidden");
   document.getElementById("dashboardView").classList.remove("hidden");
 }
 function showErrorModal(message) {
@@ -1033,129 +1278,89 @@ async function syncProjectProgress() {
   }
 }
 
-const disposition = response.headers.get("Content-Disposition") || "";
-const isProblemReport = disposition.includes("problems");
-if (isProblemReport) {
-  alert("⚠️ Architecture has verification/validation issues. Please review the report.");
-}
 
-function downloadCode() {
-  const code = document.getElementById("generatedCode").innerText;
-  const blob = new Blob([code], { type: "text/plain" });
+async function downloadCodeSKELETON() {
+
+  const btn =
+    document.getElementById("downloadBtn");
+
+  btn.innerHTML = `
+    <span
+      class="spinner-border spinner-border-sm me-2">
+    </span>
+    Downloading
+  `;
+
+  const code =
+    document.getElementById(
+      "generatedCode"
+    ).innerText;
+
+  const response = await fetch(
+    "/download-skeleton",
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json"
+      },
+
+      body: JSON.stringify({
+        tree: code
+      })
+    }
+  );
+
+  const blob = await response.blob();
+
+  const url =
+    window.URL.createObjectURL(blob);
 
   const a = document.createElement("a");
-  a.href = URL.createObjectURL(blob);
-  a.download = "skeleton.js";
+
+  a.href = url;
+
+  a.download = "code_skeleton.zip";
+
+  document.body.appendChild(a);
+
   a.click();
+
+  a.remove();
+
+  btn.innerHTML = `
+    <i class="bi bi-check-circle-fill"></i>
+    Downloaded
+  `;
 }
 
 function regenerateCode() {
   alert("Regenerating code...");
 }
 
-
 function openProject(projectId) {
-  console.log("📂 Opening project:", projectId);
+    window.location.href = `/project/${projectId}`;
+}
 
-  fetch(`/get_project/${projectId}`)
-    .then(res => res.json())
-    .then(data => {
 
-      console.log("DATA:", data); // مهم للديباج
+async function downloadFinalReport() {
 
-      if (data.error) {
-        alert("Failed to load project");
-        return;
-      }
+  const response = await fetch(
+    `/generate-final-report/${extractedData.project_id}`
+  );
 
-      // ======================
-      // 1. Restore state
-      // ======================
-      extractedData = {
-        functional: data.functional || [],
-        nfr_predictions: data.nfr_predictions || [],
-        functional_method: data.functional_method,
-        ordinal_method: data.ordinal_method,
-        binary_method: data.binary_method,
-        weighted_method: data.weighted_method,
-        hybrid_method: data.hybrid_method
-      };
+  const blob = await response.blob();
 
-      currentPhase = data.current_phase || 1;
-      selectedArchitecture = data.selectedArchitecture || null;
+  const url = window.URL.createObjectURL(blob);
 
-      window.currentProjectId = projectId;
+  const a = document.createElement("a");
 
-      // ======================
-      // 2. Switch UI
-      // ======================
-      document.getElementById('dashboardView').classList.add('hidden');
-      document.getElementById('uploadView').classList.remove('hidden');
+  a.href = url;
+  a.download = "Final_Report.pdf";
 
-      // 🔥 أهم سطر (يخفي upload UI)
-      document.getElementById("step-upload").classList.add("hidden");
+  document.body.appendChild(a);
 
-      // ======================
-      // 3. Show results UI
-      // ======================
-      document.getElementById('progressSection').classList.remove('hidden');
-      document.getElementById('resultContent').classList.remove('hidden');
+  a.click();
 
-      // ======================
-      // 4. Render correct phase
-      // ======================
-      renderPhase();
-
-      console.log("✅ Project restored successfully");
-    })
-    .catch(err => {
-      console.error("❌ Error loading project:", err);
-    });
-}  console.log("📂 Opening project:", projectId);
-
-  fetch(`/get_project/${projectId}`)
-    .then(res => res.json())
-    .then(data => {
-
-      if (data.error) {
-        alert("Failed to load project");
-        return;
-      }
-
-      // ======================
-      // 1. Restore state
-      // ======================
-      extractedData = {
-  functional: data.functional || [],
-  nfr_predictions: data.nfr_predictions || [],
-  functional_method: data.functional_method,
-  ordinal_method: data.ordinal_method,
-  binary_method: data.binary_method,
-  weighted_method: data.weighted_method,
-  hybrid_method: data.hybrid_method
-};
-
-currentPhase = data.current_phase || 1;
-      selectedArchitecture = data.selectedArchitecture || null;
-
-      window.currentProjectId = projectId;
-
-      // ======================
-      // 2. Switch UI
-      // ======================
-      document.getElementById('dashboardView').classList.add('hidden');
-      document.getElementById('uploadView').classList.remove('hidden');
-
-      // ======================
-      // 3. Show results
-      // ======================
-      document.getElementById('progressSection').classList.remove('hidden');
-      document.getElementById('resultContent').classList.remove('hidden');
-
-      renderPhase();
-
-      console.log("✅ Project loaded successfully");
-    })
-    .catch(err => {
-      console.error("❌ Error loading project:", err);
-    });
+  a.remove();
+}

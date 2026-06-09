@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 
 from fastapi import APIRouter, UploadFile, Request, File
 from fastapi.responses import JSONResponse
@@ -30,10 +31,12 @@ from infrastructure.repositories.code_skeleton_repository import (
 from infrastructure.repositories.code_skeleton_repository import (
     get_code_skeleton
 )
-from ai.inference.feature_extractor import load_selected_architecture, load_requirements
+from ai.inference.feature_extractor import generate_phase4, load_selected_architecture, load_requirements
 from application.extraction.skeleton.generator import generate_code_skeleton
+from infrastructure.repositories.human_feedback_repository import save_new_confirmed_nfr
 from service.ordinal_service import execute_ordinal_method
 from service.binary_service import execute_binary_method
+from service.retrain_service import run_retrain_async
 from service.weighted_service import execute_weighted_method
 from service.nfr_stats_service import compute_nfr_statistics
 from service.functional_service import execute_functional_method
@@ -44,19 +47,31 @@ from application.extraction.extraction_service import process_srs
 from application.extraction.adl.json_to_acme import convert_to_acme
 from ai.inference.predict_type_level import predict_and_save_nfr, predict_level_for_text
 from application.extraction.reporting.report_generator import generate_report
-
+from ai.ai_engine import ai_generate_architecture
 from service.ordinal_service import execute_ordinal_method
 from service.binary_service import execute_binary_method
 from service.weighted_service import execute_weighted_method
 from service.nfr_stats_service import compute_nfr_statistics
 from service.functional_service import execute_functional_method
 from service.hybrid_service import execute_hybrid_method
-
-from infrastructure.repositories.project_repo import update_project_progress, create_project, save_project_data
+from infrastructure.repositories.ADL_repository import save_architecture_report_pdf
+from infrastructure.repositories.project_repo import get_project, update_project_progress, create_project, save_project_data
 from infrastructure.repositories.weighted_repository import save_weighted_result
 from infrastructure.repositories.nfr_dataset_repository import NFRPredictionRepository
 import pdfplumber
+from infrastructure.database import db
+from infrastructure.repositories.srs_repository import SRSRepository
+from ai.json_to_c4_plantuml import convert_to_c4_plantuml
+from ai.json_to_process_view import convert_to_process_view
+from ai.json_to_deployment_view import convert_to_deployment_view
+from ai.json_to_usecase_view import convert_to_usecase_view
+from infrastructure.repositories.validation_report_repository import save_validation_report_pdf
+from infrastructure.repositories.project_repo import get_user_adl_projects
+from fastapi.templating import Jinja2Templates
 
+templates = Jinja2Templates(
+    directory="presentation/templates"
+)
 
 router = APIRouter()
 
@@ -643,10 +658,13 @@ async def adl_generate_pdf(
         frs = extraction_result.get("functional", [])
         adl_result = ai_generate_architecture(
             project_name,
-                 frs,
+            frs,
             nfrs,
             architecture
         )
+        print("========== ADL RESULT ==========")
+        print(json.dumps(adl_result, indent=2))
+        print("================================")
         adl_acme = convert_to_acme(adl_result)
         # =========================
         # Save ACME file
@@ -774,20 +792,7 @@ async def adl_generate_pdf(
             }
         )
     
-@router.get("/adl-dashboard")
-async def adl_dashboard(request: Request):
-    user = request.session.get("user")
-    if not user:
-        return RedirectResponse("/Login")
-    projects = get_user_adl_projects(user["id"])
-    return templates.TemplateResponse(
-        "adl_dashboard.html",
-        {
-            "request": request,
-            "projects": projects,
-            "user": user
-        }
-    )
+
 @router.get("/adl-generator", response_class=HTMLResponse)
 async def adl_generator(request: Request):
     return templates.TemplateResponse(
@@ -1688,6 +1693,8 @@ async def adl_generate_pdf(
 @router.get("/adl-dashboard")
 async def adl_dashboard(request: Request):
 
+    print("ADL DASHBOARD ROUTE HIT")
+
     user = request.session.get("user")
 
     if not user:
@@ -1703,7 +1710,6 @@ async def adl_dashboard(request: Request):
             "user": user
         }
     )
-
 
 
 @router.get("/adl-generator", response_class=HTMLResponse)
