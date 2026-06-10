@@ -4,6 +4,7 @@ let extractedData = null;
 let pendingConfirmation = false; 
 let generatedSkeletonHTML = null;
 // Add defensive check
+//newcomment 
 window.addEventListener('DOMContentLoaded', () => {
   console.log("Dashboard initialized");
   if (extractedData) {
