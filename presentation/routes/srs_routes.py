@@ -728,7 +728,7 @@ async def adl_generate_pdf(
 
         PLANTUML_JAR = os.path.abspath(PLANTUML_JAR)
         subprocess.run([
-            r"C:\Program Files\Java\jdk-24\bin\java.exe",
+            "java",
             "-jar",
             PLANTUML_JAR,
             "-tpng",
@@ -1613,7 +1613,7 @@ async def adl_generate_pdf(
         # Render PNGs using PlantUML
         # =========================
         subprocess.run([
-            r"C:\Program Files\Java\jdk-24\bin\java.exe",
+            "java",
             "-jar",
             "C:\\plantuml\\plantuml.jar",
             "-tpng",
