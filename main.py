@@ -1094,7 +1094,7 @@ async def dashboard(request: Request):
     }
 
     return templates.TemplateResponse(
-        "Dashboard.html",
+        "DashBoard.html",
         {
             "request": request,
             "user": user,
