@@ -1066,7 +1066,7 @@ async def login_page(
        info_message = "Your account created successfully! Login Now" 
     
     return templates.TemplateResponse(
-        "login.html",
+        "Login.html",
         {
             "request": request,
             "error": error_message,
