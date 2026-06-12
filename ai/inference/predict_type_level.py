@@ -15,7 +15,17 @@ OUTPUT_PATH = os.path.join(BASE_OUTPUT, "nfr_predictions_type_level.json")
 
 MODEL_TYPE_PATH = "hanawahab/trained_nfr_type_model"
 MODEL_LEVEL_PATH = "hanawahab/trained_nfr_level_model"
+print("🔥 Loading TYPE model...")
+tokenizer = BertTokenizer.from_pretrained(MODEL_TYPE_PATH)
+model_type = BertForSequenceClassification.from_pretrained(MODEL_TYPE_PATH)
 
+print("🔥 Loading LEVEL model...")
+model_level = BertForSequenceClassification.from_pretrained(MODEL_LEVEL_PATH)
+
+model_type.eval()
+model_level.eval()
+
+print("✅ Models loaded")
 # 🔥 LOAD LEVEL MODEL ONCE ONLY
 
 #df_global = NFRDatasetRepository.load_nfr_dataset_from_mongo()
@@ -49,12 +59,7 @@ def predict_and_save_nfr(project_id: str):
     le_level.fit(df["Level"])
     
     # 2️⃣ Load models
-    tokenizer = BertTokenizer.from_pretrained(MODEL_TYPE_PATH)
-    model_type = BertForSequenceClassification.from_pretrained(MODEL_TYPE_PATH)
-    model_level = BertForSequenceClassification.from_pretrained(MODEL_LEVEL_PATH)
     
-    model_type.eval()
-    model_level.eval()
     
     # 3️⃣ Load extracted NFRs
     with open(NFR_INPUT_PATH, "r", encoding="utf-8") as f:
