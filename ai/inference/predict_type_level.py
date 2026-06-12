@@ -9,94 +9,87 @@ from infrastructure.repositories.nfr_dataset_repository import (
     NFRDatasetRepository,
     NFRPredictionRepository
 )
+
 BASE_OUTPUT = "data/outputs"
 NFR_INPUT_PATH = os.path.join(BASE_OUTPUT, "non_functional_requirements.json")
 OUTPUT_PATH = os.path.join(BASE_OUTPUT, "nfr_predictions_type_level.json")
 
 MODEL_TYPE_PATH = "hanawahab/trained_nfr_type_model"
 MODEL_LEVEL_PATH = "hanawahab/trained_nfr_level_model"
+
+# ============================================================
+# LOAD EVERYTHING ONCE AT STARTUP
+# ============================================================
+
+print("🔥 Loading dataset for encoders...")
+_df_global = NFRDatasetRepository.load_nfr_dataset_from_mongo()
+
+le_type = LabelEncoder()
+le_type.fit(_df_global["Type"])
+
+le_level = LabelEncoder()
+le_level.fit(_df_global["Level"])
+
+print("✅ Encoders ready")
+
 print("🔥 Loading TYPE model...")
-tokenizer = BertTokenizer.from_pretrained(MODEL_TYPE_PATH)
+tokenizer_type = BertTokenizer.from_pretrained(MODEL_TYPE_PATH)
 model_type = BertForSequenceClassification.from_pretrained(MODEL_TYPE_PATH)
-
 model_type.eval()
-
 print("✅ TYPE model loaded")
 
-print("✅ Models loaded")
-# 🔥 LOAD LEVEL MODEL ONCE ONLY
+print("🔥 Loading LEVEL model...")
+tokenizer_level = BertTokenizer.from_pretrained(MODEL_LEVEL_PATH)
+model_level = BertForSequenceClassification.from_pretrained(MODEL_LEVEL_PATH)
+model_level.eval()
+print("✅ LEVEL model loaded")
 
-#df_global = NFRDatasetRepository.load_nfr_dataset_from_mongo()
 
-#le_level = LabelEncoder()
-#le_level.fit(df_global["Level"])
-
-#tokenizer_level = BertTokenizer.from_pretrained(MODEL_LEVEL_PATH)
-#model_level = BertForSequenceClassification.from_pretrained(MODEL_LEVEL_PATH)
-
-#model_level.eval()
+# ============================================================
+# HELPERS
+# ============================================================
 
 def softmax_np(x: np.ndarray) -> np.ndarray:
     e = np.exp(x - np.max(x))
     return e / (np.sum(e) + 1e-12)
 
 
+# ============================================================
+# PREDICT TYPE + LEVEL FOR ALL NFRs IN A PROJECT
+# ============================================================
+
 def predict_and_save_nfr(project_id: str):
-    """
-    Predict NFR Type + Level + Confidence
-    Returns ALL predictions (both high and low confidence)
-    """
-    
-    # 1️⃣ Load dataset for encoders
-    df = NFRDatasetRepository.load_nfr_dataset_from_mongo()
-    
-    le_type = LabelEncoder()
-    le_type.fit(df["Type"])
-    
-    le_level = LabelEncoder()
-    le_level.fit(df["Level"])
-    
-    # 2️⃣ Load models
-    
-    
-    # 3️⃣ Load extracted NFRs
+    # Load extracted NFRs from file
     with open(NFR_INPUT_PATH, "r", encoding="utf-8") as f:
         nfrs = json.load(f)
-    
+
     texts = [item["description"] for item in nfrs]
     if not texts:
         raise ValueError("No NFRs found")
-    
-    # 4️⃣ Tokenize
-    tokens = tokenizer(
+
+    # Tokenize using module-level tokenizer
+    tokens = tokenizer_type(
         texts,
         padding=True,
         truncation=True,
         max_length=128,
         return_tensors="pt"
     )
-    
-    # 5️⃣ Predict
+
+    # Predict using module-level model
     with torch.no_grad():
         logits_type = model_type(**tokens).logits
 
-    
     logits_type_np = logits_type.cpu().numpy()
-    
-    
-    
-    
-    
-    # 6️⃣ Build ALL results
+
     results = []
-    
     for i, item in enumerate(nfrs):
         probs = softmax_np(logits_type_np[i])
         pred_idx = int(np.argmax(probs))
-        
+
         pred_type = le_type.inverse_transform([pred_idx])[0]
         confidence = float(probs[pred_idx])
-        
+
         results.append({
             "title": item.get("title"),
             "description": item.get("description"),
@@ -106,30 +99,21 @@ def predict_and_save_nfr(project_id: str):
             "predicted_level": "System",
             "confirmed": False
         })
+
     NFRPredictionRepository.save_batch(project_id, results)
-    # 7️⃣ Save to file
+
     with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
-    
+
     print(f"✅ NFR predictions generated: {len(results)} total")
-    
     return results
 
 
+# ============================================================
+# PREDICT LEVEL FOR A SINGLE TEXT (after user confirms type)
+# ============================================================
+
 def predict_level_for_text(text: str) -> str:
-    """
-    Predict ONLY level for a single NFR text
-    Used after user confirms the type
-    """
-    df_global = NFRDatasetRepository.load_nfr_dataset_from_mongo()
-
-    le_level = LabelEncoder()
-    le_level.fit(df_global["Level"])
-
-    tokenizer_level = BertTokenizer.from_pretrained(MODEL_LEVEL_PATH)
-    model_level = BertForSequenceClassification.from_pretrained(MODEL_LEVEL_PATH)
-
-    model_level.eval()
     tokens = tokenizer_level(
         [text],
         padding=True,
@@ -137,9 +121,9 @@ def predict_level_for_text(text: str) -> str:
         max_length=128,
         return_tensors="pt"
     )
-    
+
     with torch.no_grad():
         logits = model_level(**tokens).logits
-    
+
     pred_id = int(torch.argmax(logits, dim=1))
     return le_level.inverse_transform([pred_id])[0]
