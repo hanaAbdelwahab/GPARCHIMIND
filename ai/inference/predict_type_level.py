@@ -19,11 +19,9 @@ print("🔥 Loading TYPE model...")
 tokenizer = BertTokenizer.from_pretrained(MODEL_TYPE_PATH)
 model_type = BertForSequenceClassification.from_pretrained(MODEL_TYPE_PATH)
 
-print("🔥 Loading LEVEL model...")
-model_level = BertForSequenceClassification.from_pretrained(MODEL_LEVEL_PATH)
-
 model_type.eval()
-model_level.eval()
+
+print("✅ TYPE model loaded")
 
 print("✅ Models loaded")
 # 🔥 LOAD LEVEL MODEL ONCE ONLY
@@ -81,13 +79,13 @@ def predict_and_save_nfr(project_id: str):
     # 5️⃣ Predict
     with torch.no_grad():
         logits_type = model_type(**tokens).logits
-        logits_level = model_level(**tokens).logits
+
     
     logits_type_np = logits_type.cpu().numpy()
-    logits_level_np = logits_level.cpu().numpy()
     
-    pred_level_ids = np.argmax(logits_level_np, axis=1)
-    pred_levels = le_level.inverse_transform(pred_level_ids)
+    
+    
+    
     
     # 6️⃣ Build ALL results
     results = []
@@ -105,7 +103,7 @@ def predict_and_save_nfr(project_id: str):
             "predicted_type": pred_type,
             "predicted_type_label": NFR_MAP_REVERSE.get(pred_type, pred_type),
             "confidence": confidence,
-            "predicted_level": pred_levels[i],
+            "predicted_level": "System",
             "confirmed": False
         })
     NFRPredictionRepository.save_batch(project_id, results)
