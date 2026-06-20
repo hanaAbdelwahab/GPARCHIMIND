@@ -1,4 +1,4 @@
-from ai.ai_engine import ask_llm, extract_json
+from ai.ai_engine import ask_llm, extract_json, robust_usecase_json
 import re
 
 
@@ -139,10 +139,10 @@ Requirements:
 """
 
     # 🔥 AI call
-    response = ask_llm(prompt)
+    
 
     # 🧠 parse + fix
-    data = extract_json(response)
+    data = robust_usecase_json(prompt)
     data = normalize_ai_output(data)
     if len(data["actors"]) == 1 and data["actors"][0].lower() == "user":
        data["actors"] = [

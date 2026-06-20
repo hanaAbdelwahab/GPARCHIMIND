@@ -12,7 +12,11 @@ if not HF_API_KEY:
     raise RuntimeError("HF_API_KEY not found in environment variables")
 
 MODEL_NAME = "Qwen/Qwen2.5-14B-Instruct"
-
+USECASE_MODEL = "meta-llama/Meta-Llama-3-8B-Instruct"
+usecase_client = InferenceClient(
+    model=USECASE_MODEL,
+    token=HF_API_KEY
+)
 client = InferenceClient(
     model=MODEL_NAME,
     token=HF_API_KEY
@@ -36,6 +40,36 @@ def ask_llm(prompt: str, temperature=0.2):
 
 
 # ================= SAFE JSON EXTRACTION =================
+def ask_llm_usecase(prompt, temperature=0.2):
+    print("\n========== USECASE DEBUG ==========")
+    print("MODEL:", USECASE_MODEL)
+    print("TEMPERATURE:", temperature)
+    print("PROMPT LENGTH:", len(prompt))
+    print("PROMPT PREVIEW:")
+    print(prompt[:500])
+    print("===================================\n")
+    response = usecase_client.chat_completion(
+
+        messages=[
+            {
+                "role":"system",
+                "content":"You are a strict JSON generator. Return ONLY raw JSON."
+            },
+
+            {
+                "role":"user",
+                "content":prompt
+            }
+        ],
+
+        max_tokens=1500,
+        temperature=temperature
+
+    )
+    print("\n========== USECASE RESPONSE ==========")
+    print(response)
+    print("======================================\n")
+    return response.choices[0].message.content
 
 def extract_json(text: str):
 
@@ -117,6 +151,47 @@ Original request:
 
     raise RuntimeError(f"LLM failed after {retries} attempts: {last_error}")
 # ================= FALLBACK COMPONENTS =================
+def robust_usecase_json(prompt,retries=4):
+
+    last_error=None
+    original_prompt=prompt
+
+
+    for i in range(retries):
+
+        try:
+
+            response=ask_llm_usecase(prompt)
+
+            return extract_json(response)
+
+
+        except Exception as e:
+
+            last_error=e
+
+
+            prompt=f"""
+
+Previous response was invalid JSON.
+
+Error:
+{e}
+
+
+Return ONLY valid JSON.
+
+
+Original request:
+
+{original_prompt}
+
+"""
+
+
+
+    raise RuntimeError(last_error)
+
 
 def fallback_components(style):
 
