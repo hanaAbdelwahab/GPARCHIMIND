@@ -1,3 +1,4 @@
+from bson import ObjectId
 from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.templating import Jinja2Templates
 from fastapi import APIRouter
@@ -8,7 +9,7 @@ import io
 from datetime import datetime
 from service.functional_service import execute_functional_method
 from service.ordinal_service import execute_ordinal_method
-
+from infrastructure.repositories.code_skeleton_repository import get_code_skeleton
 from service.binary_service import execute_binary_method
 
 from service.weighted_service import execute_weighted_method
@@ -22,7 +23,8 @@ from infrastructure.repositories.weighted_repository import save_weighted_result
 from ai.inference.predict_type_level import predict_and_save_nfr, predict_level_for_text
 
 import traceback
-from infrastructure.repositories.ADL_repository import save_architecture_report_pdf, save_verification_report_pdf
+from application.extraction.adl.verification.verification_report_generator import generate_verification_pdf
+from infrastructure.repositories.adl_verification_report_repository import save_verification_report_pdf1
 from fastapi.responses import JSONResponse
 from application.extraction.adl.verification.runner import run_verification
 from application.extraction.adl.verification.verification_report_generator import generate_verification_pdf
@@ -41,7 +43,7 @@ from ai.json_to_deployment_view import convert_to_deployment_view
 from application.extraction.api.hybrid_route import router as hybrid_router
 from ai.json_to_c4_plantuml import convert_to_c4_plantuml
 from ai.ai_engine import ai_generate_architecture
-from ai.json_to_usecase_view import convert_to_usecase_view
+from ai.ai_usecase import generate_usecase_ai
 from application.extraction.adl.json_to_acme import convert_to_acme
 import os
 from fastapi import FastAPI, Request, UploadFile, File
@@ -57,7 +59,7 @@ from presentation.routes.srs_routes import router as srs_router
 from presentation.routes import auth
 from starlette.middleware.sessions import SessionMiddleware
 from dotenv import load_dotenv
-from infrastructure.repositories.project_repo import get_user_projects
+from infrastructure.repositories.project_repo import get_project, get_user_projects
 from infrastructure.database import db
 from pathlib import Path
 import subprocess
@@ -78,7 +80,19 @@ from presentation.routes.download_routes import router as download_router
 from presentation.routes.srs_validation_routes import router as validation_router
 from ai.validations.srs_validator import SRSValidator
 from dotenv import load_dotenv
+
 load_dotenv() 
+def make_json_safe(obj):
+    """Recursively convert datetime/ObjectId to strings so Jinja's tojson won't crash."""
+    if isinstance(obj, dict):
+        return {k: make_json_safe(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [make_json_safe(v) for v in obj]
+    elif isinstance(obj, (datetime, ObjectId)):
+        return str(obj)
+    else:
+        return obj
+    
 def auto_retrain_loop():
     while True:
         time.sleep(86400)
@@ -348,34 +362,114 @@ async def open_project(
     # ==========================================
     # TEMPLATE
     # ==========================================
+    patterns_doc = db.design_patterns.find_one(
+    {"project_id": project_id})
+    patterns = []
+    if patterns_doc:
+       patterns = patterns_doc.get("patterns", [])
+    skeleton = get_code_skeleton(project_id)
+
+    adl_report_exists = db.architecture_reports.find_one({
+       "project_id": project_id
+    })
+
+    validation_report_exists = db.validation_reports.find_one({
+        "project_id": project_id
+    })
+
+    verification_report_exists = db.ADLVerificationReports.find_one({
+        "project_id": project_id
+   })
+    print("PATTERNS =", patterns)
+    print("SKELETON =", skeleton)
+    print("ADL REPORT =", adl_report_exists)
+    print("VALIDATION REPORT =", validation_report_exists)
+    print("VERIFICATION REPORT =", verification_report_exists)
 
     return templates.TemplateResponse(
+    "project_dashboard.html",
+    {
+        "request": request,
+        "user": request.session.get("user"),
+        "project": project,
+        "frs": frs,
+        "nfrs": nfrs,
+        "hybrid_results": hybrid_results,
+        "selected_architecture": selected_architecture,
 
-        "project_dashboard.html",
+        "patterns": patterns,
+        "skeleton": skeleton,
 
-        {
-            "request": request,
-            "user": request.session.get("user"),
-            "project": project,
-            "frs": frs,
-            "nfrs": nfrs,
+        "adl_report_exists": bool(adl_report_exists),
+        "validation_report_exists": bool(validation_report_exists),
+        "verification_report_exists": bool(verification_report_exists),
 
-            # 🔥 ONLY HYBRID
-            "hybrid_results": hybrid_results,
-            "selected_architecture": selected_architecture,
-            "requirement_drift":
-            project.get(
-                "requirement_drift"
-            )
-        }
+        "requirement_drift": project.get("requirement_drift")
+    }
+)
+# ==========================================
+# RE-EVALUATE ARCHITECTURE
+# ==========================================
+# ==========================================
+# RE-EVALUATE ARCHITECTURE
+# ==========================================
+def compute_architecture_results(project_id: str):
+    saved_predictions = list(
+        db.nfr_predictions.find({"project_id": project_id}, {"_id": 0})
     )
-# ==========================================
-# RE-EVALUATE ARCHITECTURE
-# ==========================================
-# ==========================================
-# RE-EVALUATE ARCHITECTURE
-# ==========================================
 
+    functional_result = execute_functional_method(project_id)
+
+    freq_norm, must_norm, importance = compute_nfr_statistics(saved_predictions)
+
+    ordinal_result = execute_ordinal_method(project_id)
+
+    TYPE_MAPPING = {
+        "Performance": "PE",
+        "Scalability": "SC",
+        "Maintainability": "MN",
+        "Availability": "A",
+        "Security": "SE",
+        "Usability": "US",
+        "Portability": "PO",
+        "Reliability": "O",
+        "Modularity": "MN",
+        "Interoperability": "SC"
+    }
+
+    binary_vector = {
+        "PE": 0, "SC": 0, "MN": 0, "A": 0,
+        "SE": 0, "US": 0, "PO": 0, "O": 0
+    }
+
+    for pred in saved_predictions:
+        mapped_type = TYPE_MAPPING.get(pred.get("predicted_type", ""), "")
+        if mapped_type in binary_vector:
+            binary_vector[mapped_type] = 1
+
+    binary_result = execute_binary_method(project_id, binary_vector)
+
+    weighted_result = execute_weighted_method(
+        freq_norm=freq_norm,
+        must_norm=must_norm,
+        importance=importance
+    )
+
+    hybrid_result = execute_hybrid_method(
+        project_id,
+        functional_result,
+        ordinal_result,
+        binary_result,
+        weighted_result
+    )
+
+    return {
+        "functional_method": functional_result,
+        "ordinal_method": ordinal_result.get("result", []),
+        "binary_method": binary_result,
+        "weighted_method": weighted_result,
+        "hybrid_method": hybrid_result
+    }
 @app.post("/project/{project_id}/reevaluate")
 async def reevaluate_architecture(
     request: Request,
@@ -491,172 +585,16 @@ async def reevaluate_architecture(
         # FUNCTIONAL METHOD
         # ==========================================
 
-        functional_result = execute_functional_method(
-            project_id
-        )
-
-        print("FUNCTIONAL:", functional_result)
-
-        # ==========================================
-        # COMPUTE NFR STATISTICS
-        # ==========================================
-
-        freq_norm, must_norm, importance = \
-            compute_nfr_statistics(
-                saved_predictions
-            )
-
-        # ==========================================
-        # ORDINAL METHOD
-        # ==========================================
-
-        ordinal_result = execute_ordinal_method(
-            project_id
-        )
-
-        print("ORDINAL:", ordinal_result)
-
-        # ==========================================
-        # NFR TYPE MAPPING
-        # ==========================================
-
-        TYPE_MAPPING = {
-
-            "Performance": "PE",
-
-            "Scalability": "SC",
-
-            "Maintainability": "MN",
-
-            "Availability": "A",
-
-            "Security": "SE",
-
-            "Usability": "US",
-
-            "Portability": "PO",
-
-            "Reliability": "O",
-
-            "Modularity": "MN",
-
-            "Interoperability": "SC"
-        }
-
-        # ==========================================
-        # BUILD BINARY VECTOR
-        # ==========================================
-
-        binary_vector = {
-
-            "PE": 0,
-            "SC": 0,
-            "MN": 0,
-            "A": 0,
-            "SE": 0,
-            "US": 0,
-            "PO": 0,
-            "O": 0
-        }
-
-        for pred in saved_predictions:
-
-            original_type = pred.get(
-                "predicted_type",
-                ""
-            )
-
-            mapped_type = TYPE_MAPPING.get(
-                original_type,
-                ""
-            )
-
-            if mapped_type in binary_vector:
-
-                binary_vector[mapped_type] = 1
-
-        print("BINARY VECTOR:", binary_vector)
-
-        # ==========================================
-        # BINARY METHOD
-        # ==========================================
-
-        binary_result = execute_binary_method(
-
-            project_id,
-
-            binary_vector
-        )
-
-        print("BINARY:", binary_result)
-
-        # ==========================================
-        # WEIGHTED METHOD
-        # ==========================================
-
-        weighted_result = execute_weighted_method(
-
-            freq_norm=freq_norm,
-
-            must_norm=must_norm,
-
-            importance=importance
-        )
-
-        save_weighted_result(
-
-            project_id,
-
-            weighted_result
-        )
-
-        print("WEIGHTED:", weighted_result)
-
-        # ==========================================
-        # HYBRID METHOD
-        # ==========================================
-
-        hybrid_result = execute_hybrid_method(
-
-            project_id,
-
-            functional_result,
-
-            ordinal_result,
-
-            binary_result,
-
-            weighted_result
-        )
-
-        print("HYBRID:", hybrid_result)
+        computed = compute_architecture_results(project_id)
 
         # ==========================================
         # RETURN RESULTS
         # ==========================================
 
-        return {
-
-            "status": "success",
-
-            "functional_method":
-                functional_result,
-
-            "ordinal_method":
-                ordinal_result.get(
-                    "result",
-                    []
-                ),
-
-            "binary_method":
-                binary_result,
-
-            "weighted_method":
-                weighted_result,
-
-            "hybrid_method":
-                hybrid_result
-        }
+        return{
+    "status":"success",
+    **computed
+}
 
     except Exception as e:
 
@@ -672,7 +610,62 @@ async def reevaluate_architecture(
             }
         )
     
+@app.get("/project/{project_id}/resume-data")
+async def get_resume_data(project_id: str):
 
+    project = db.projects.find_one(
+        {"project_id": project_id}, {"_id": 0}
+    )
+
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    frs = list(
+        db.fr_extracted.find({"project_id": project_id}, {"_id": 0})
+    )
+
+    nfr_predictions = list(
+        db.nfr_predictions.find({"project_id": project_id}, {"_id": 0})
+    )
+
+    TYPE_LABELS = {
+        "PE": "Performance", "SC": "Scalability", "MN": "Maintainability",
+        "A": "Availability", "SE": "Security", "US": "Usability",
+        "PO": "Portability", "O": "Reliability", "MD": "Modularity",
+        "IN": "Interoperability", "FT": "Fault Tolerance", "L": "Latency",
+        "LF": "Load Factor", "RE": "Reliability", "AC": "Accessibility",
+        "CO": "Compatibility"
+    }
+
+    for nfr in nfr_predictions:
+        ptype = nfr.get("predicted_type", "")
+        nfr["predicted_type_label"] = TYPE_LABELS.get(ptype, ptype or "Unknown")
+
+    try:
+        computed = compute_architecture_results(project_id)
+    except Exception:
+        traceback.print_exc()
+        computed = {
+            "functional_method": {},
+            "ordinal_method": [],
+            "binary_method": {},
+            "weighted_method": {},
+            "hybrid_method": []
+        }
+
+    patterns_doc = db.design_patterns.find_one(
+        {"project_id": project_id}, {"_id": 0}
+    )
+    patterns = patterns_doc.get("patterns", []) if patterns_doc else []
+
+    return {
+        "project_id": project_id,
+        "current_phase": project.get("current_phase", 1),
+        "functional": [{"description": fr.get("description", "")} for fr in frs],
+        "nfr_predictions": nfr_predictions,
+        "phase4": {"top_patterns": patterns},
+        **computed
+    }
 
 # ==========================================
 # SAVE UPDATED REQUIREMENTS
@@ -957,13 +950,13 @@ def generate_architecture(project_id: str):
     try:
         verification_result = run_verification(arch)
         print(f"[verify] run_verification status={verification_result.get('status')}", flush=True)
-        verification_pdf_path = generate_verification_pdf(verification_result)
+        verification_pdf_path = generate_verification_pdf(verification_result, project_id)
         print(f"[verify] PDF generated at: {verification_pdf_path}", flush=True)
         with open(verification_pdf_path, "rb") as _vf:
             _vbytes = _vf.read()
         print(f"[verify] PDF bytes read: {len(_vbytes)}", flush=True)
 
-        save_verification_report_pdf(project_id, _vbytes)
+        save_verification_report_pdf1(project_id, _vbytes)
         print("[verify] verification report saved to MongoDB successfully", flush=True)
     except Exception as e:
         import traceback
@@ -1118,7 +1111,10 @@ async def login_page(
     )
 
 @app.get("/Dashboard", response_class=HTMLResponse)
-async def dashboard(request: Request):
+async def dashboard(
+        request: Request,
+        continue_project: str = None
+):
     user_session = request.session.get("user")
 
     if not user_session:
@@ -1127,8 +1123,8 @@ async def dashboard(request: Request):
             status_code=303
         )
 
-    user_id = user_session["id"]          # 🔥
-    projects = get_user_projects(user_id) # 🔥
+    user_id = user_session["id"]
+    projects = get_user_projects(user_id)
 
     user = {
         "full_name": user_session.get("name", "User"),
@@ -1141,10 +1137,10 @@ async def dashboard(request: Request):
         {
             "request": request,
             "user": user,
-            "projects": projects   # 🔥 ده اللي كان ناقص
+            "projects": projects,
+            "resume_project_id": continue_project
         }
     )
-
 @app.get("/phase4/{project_id}")
 def get_phase4(project_id: str):
     return generate_phase4(project_id)
@@ -1186,7 +1182,7 @@ app.include_router(
 @app.get("/api/report/{project_id}")
 def get_report(project_id: str):
 
-    doc = db.architecture_reports.find_one({
+    doc = db.ADLVerificationReports.find_one({
 
         "project_id": project_id,
 
@@ -1258,13 +1254,17 @@ def download_verification_report(
             f"inline; filename={project_id}_verification.pdf"
         }
     )
-from application.extraction.reporting.final_report_generator import generate_last_report
+from application.extraction.reporting.final_report_generator import (
+    generate_last_report,
+    build_final_report_payload,
+)
+from infrastructure.repositories.code_skeleton_repository import get_code_skeleton
 @app.get("/generate-final-report/{project_id}")
-def generate_final_report(project_id: str):
+def generate_final_report(project_id: str, format: str = "pdf"):
 
     project = db.projects.find_one({
         "project_id": project_id
-    })
+    }) or {}
     project["project_id"] = project_id
     frs = list(
         db.fr_extracted.find(
@@ -1284,16 +1284,46 @@ def generate_final_report(project_id: str):
         "project_id": project_id
     })
 
-    phase4 = generate_phase4(project_id)
+    design_patterns_doc = db.design_patterns.find_one(
+        {"project_id": project_id},
+        {"_id": 0}
+    ) or {}
+    design_patterns = design_patterns_doc.get("patterns", []) or []
+
+    # Reuse persisted Phase 4 output — do NOT recompute feature extraction here.
+    phase4 = {
+        "phase4": {
+            "top_patterns": design_patterns,
+        }
+    }
+
+    code_skeleton_doc = get_code_skeleton(project_id) or {}
+    code_skeleton = {
+        "language": code_skeleton_doc.get("language", ""),
+        "tree": code_skeleton_doc.get("tree", ""),
+    }
 
     pdf_path = generate_last_report(
         project,
         frs,
         nfrs,
         hybrid,
-        phase4
+        phase4,
+        design_patterns=design_patterns,
+        code_skeleton=code_skeleton
     )
-
+    if format and format.lower() == "json":
+        payload = build_final_report_payload(
+            project,
+            frs,
+            nfrs,
+            hybrid,
+            phase4,
+            design_patterns=design_patterns,
+            code_skeleton=code_skeleton,
+        )
+        payload["pdf_url"] = f"/generate-final-report/{project_id}"
+        return JSONResponse(content=payload)
     return FileResponse(
         path=pdf_path,
         filename="final_report.pdf",
